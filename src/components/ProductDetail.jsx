@@ -6,7 +6,7 @@ import Accordion from './Accordion.jsx';
 import { useReveal } from '../hooks/useReveal.js';
 
 export default function ProductDetail() {
-  const { currentProductId, locale, go, addToCart, fmt, products } = useApp();
+  const { currentProductId, locale, go, addToCart, fmt, products, isWishlisted, toggleWishlist } = useApp();
 
   const [p, setP] = useState(null);          // the API product detail
   const [loading, setLoading] = useState(true);
@@ -166,6 +166,13 @@ export default function ProductDetail() {
           <div className="pdp-cta">
             <button className="btn" disabled={stock <= 0} onClick={() => handleAdd(false)}><span>Add to bag</span></button>
             <button className="btn ghost" disabled={stock <= 0} onClick={() => handleAdd(true)}><span>Buy now</span></button>
+            <button
+              className={`prod-wish pdp-wish ${isWishlisted(p.slug) ? 'active' : ''}`}
+              title="Save to wishlist"
+              onClick={() => toggleWishlist(p)}
+            >
+              <svg viewBox="0 0 24 24"><path d="M12 21s-7-4.5-9.5-9C1 9 2.5 5 6 5c2 0 3.2 1.2 4 2.3C10.8 6.2 12 5 14 5c3.5 0 5 4 3.5 7-2.5 4.5-9.5 9-9.5 9z" /></svg>
+            </button>
           </div>
 
           <div className="trust-row">

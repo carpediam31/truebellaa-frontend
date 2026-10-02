@@ -14,6 +14,9 @@ export default function MobileMenu() {
       <a onClick={() => nav('listing', 'Pendants')}>Pendants</a>
       <a onClick={() => nav('listing', 'Bracelets')}>Bracelets</a>
       <a onClick={() => nav('cart')}>Cart</a>
+      <a onClick={() => nav('wishlist')}>Wishlist</a>
+      <a onClick={() => nav('account')}>Account</a>
+      <a onClick={() => nav('track')}>Track order</a>
     </div>
   );
 }

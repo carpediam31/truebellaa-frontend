@@ -2,7 +2,7 @@ import React from 'react';
 import { useApp } from '../context/AppContext.jsx';
 
 export default function Success() {
-  const { successOrderId, go } = useApp();
+  const { successOrderId, successOrderPublicId, successOrderEmail, customer, go } = useApp();
 
   return (
     <div className="wrap success">
@@ -11,7 +11,15 @@ export default function Success() {
       <p>Your order has been placed successfully.</p>
       <p>Order ID: <span className="oid">{successOrderId}</span></p>
       <p style={{ marginTop: 8 }}>A confirmation has been sent to your email.</p>
-      <div style={{ marginTop: 36 }}>
+      {!customer && (
+        <p style={{ marginTop: 8 }} className="account-muted">
+          <a onClick={() => go('account')}>Create an account</a> to track this order anytime.
+        </p>
+      )}
+      <div style={{ marginTop: 36, display: 'flex', gap: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
+        {successOrderPublicId && (
+          <a className="btn" onClick={() => go('track', { id: successOrderPublicId, email: successOrderEmail })}><span>Track this order</span></a>
+        )}
         <a className="btn ghost" onClick={() => go('home')}><span>Continue shopping</span></a>
       </div>
     </div>

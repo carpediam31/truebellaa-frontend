@@ -3,11 +3,16 @@ import { useApp } from '../context/AppContext.jsx';
 import { api } from '../api.js';
 
 export default function TrackOrder() {
-  const { pageArg, fmt } = useApp();
-  const [orderId, setOrderId] = useState(pageArg || '');
+  const { pageArg, customer, fmt } = useApp();
+  // pageArg is either a bare order id (from a link) or { id, email } handed
+  // over by the Success page right after checkout.
+  const argId = typeof pageArg === 'string' ? pageArg : (pageArg?.id || '');
+  const argEmail = typeof pageArg === 'object' ? (pageArg?.email || '') : '';
+
+  const [orderId, setOrderId] = useState(argId);
   // Orders expose the buyer's address, so a guest must prove ownership by
   // giving the email they checked out with. Logged-in customers don't need it.
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState(argEmail);
   const [order, setOrder] = useState(null);
   const [tracking, setTracking] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -29,7 +34,17 @@ export default function TrackOrder() {
     }
   };
 
-  useEffect(() => { if (pageArg) { setOrderId(pageArg); lookup(pageArg); } }, [pageArg]);
+  // Auto-look-up only when it can actually succeed: a logged-in shopper is
+  // matched on their account, and a guest needs the email we carried over
+  // from checkout. Firing without either just showed "Order not found" the
+  // instant someone clicked "Track this order".
+  useEffect(() => {
+    if (!argId) return;
+    setOrderId(argId);
+    if (argEmail) setEmail(argEmail);
+    if (customer || argEmail) lookup(argId, argEmail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [argId, argEmail, customer]);
 
   return (
     <div className="wrap track-wrap">

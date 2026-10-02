@@ -4,10 +4,23 @@ import { useApp } from '../context/AppContext.jsx';
 const STATES = ["Uttar Pradesh", "Delhi", "Maharashtra", "Karnataka", "Tamil Nadu", "Gujarat", "West Bengal", "Rajasthan", "Other"];
 
 export default function Checkout() {
-  const { cart, cartTotal, go, payNow, fmt } = useApp();
+  const { cart, cartTotal, go, payNow, fmt, customer } = useApp();
   const [form, setForm] = useState({
     email: '', phone: '', fname: '', lname: '', addr: '', city: '', pin: '', state: ''
   });
+
+  // Fill in what we already know about the logged-in shopper. The order is
+  // always filed under their account email, so the field must show that
+  // rather than invite them to type a different one.
+  useEffect(() => {
+    if (!customer) return;
+    setForm((f) => ({
+      ...f,
+      email: customer.email || f.email,
+      fname: f.fname || (customer.full_name || '').split(' ')[0] || '',
+      lname: f.lname || (customer.full_name || '').split(' ').slice(1).join(' ') || '',
+    }));
+  }, [customer]);
   const [errors, setErrors] = useState([]);
 
   useEffect(() => {
@@ -29,13 +42,28 @@ export default function Checkout() {
     <div className="wrap checkout-wrap">
       <h1 className="serif">Checkout</h1>
       <p className="sub">Secure payment powered by Razorpay</p>
+
+      {/* Say this up front. Discovering it only after the form is filled
+          in is a far worse experience than one line here. */}
+      {!customer && (
+        <div className="checkout-login-note">
+          <b>Please log in to place your order.</b>{' '}
+          <a onClick={() => go('account')}>Log in or create an account</a> — we email
+          you a code to confirm your address. Your bag is saved.
+        </div>
+      )}
       <div className="checkout-layout">
         <div>
           <div className="form-sec">
             <h3><span className="num">1</span> Contact</h3>
             <div className="field full">
               <label>Email address</label>
-              <input className={isErr('email') ? 'err' : ''} type="email" placeholder="you@email.com" value={form.email} onChange={setField('email')} />
+              <input className={isErr('email') ? 'err' : ''} type="email"
+                placeholder="you@email.com" value={form.email}
+                onChange={setField('email')} readOnly={!!customer} />
+              {customer && (
+                <small className="field-note">Your order confirmation goes to this address.</small>
+              )}
             </div>
             <div className="field full">
               <label>Phone number</label>

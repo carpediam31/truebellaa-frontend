@@ -23,7 +23,7 @@ export default function Footer() {
             <h4>Support</h4>
             <a>Shipping &amp; returns</a>
             <a>Care guide</a>
-            <a>Track order</a>
+            <a onClick={() => go('track')}>Track order</a>
             <a>Contact us</a>
           </div>
           <div className="foot-col">

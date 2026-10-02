@@ -34,6 +34,9 @@ export function AppProvider({ children }) {
   const [currentProductId, setCurrentProductId] = useState(null);
   const [successOrderId, setSuccessOrderId] = useState('');
   const [successOrderPublicId, setSuccessOrderPublicId] = useState('');
+  // The email the order was placed with. Orders can't be read from the id
+  // alone any more, so Track Order needs it for a guest.
+  const [successOrderEmail, setSuccessOrderEmail] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [headerSolid, setHeaderSolid] = useState(false);
@@ -232,9 +235,10 @@ export function AppProvider({ children }) {
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
 
   // ---- order success ----
-  const orderSuccess = useCallback((orderNumber, orderPublicId) => {
+  const orderSuccess = useCallback((orderNumber, orderPublicId, orderEmail) => {
     setSuccessOrderId(orderNumber);
     setSuccessOrderPublicId(orderPublicId || '');
+    setSuccessOrderEmail(orderEmail || '');
     setCart([]);
     go('success');
   }, [go]);
@@ -267,7 +271,9 @@ export function AppProvider({ children }) {
           razorpay_payment_id: payment.razorpay_payment_id,
           razorpay_signature: payment.razorpay_signature,
         });
-        orderSuccess(co.order_number, co.order_public_id);
+        // Pass the email through so Track Order works straight away;
+        // a logged-in shopper is matched on their account instead.
+        orderSuccess(co.order_number, co.order_public_id, formValues.email);
       };
 
       // 2a) DEMO mode (no live keys) — simulate a successful payment
@@ -302,9 +308,17 @@ export function AppProvider({ children }) {
       rzp.on('payment.failed', () => toast('Payment failed. Please try again.'));
       rzp.open();
     } catch (e) {
+      // The store can require a verified account before checkout
+      // (Settings -> Orders). Send them to login rather than showing a
+      // dead-end error on a full cart.
+      if (e.status === 401) {
+        toast(e.message || 'Please log in to place your order');
+        go('account');
+        return;
+      }
       toast(e.message || 'Checkout failed. Please try again.');
     }
-  }, [cart, toast, orderSuccess]);
+  }, [cart, toast, orderSuccess, go]);
 
   // ---- newsletter ----
   const subscribe = useCallback((email) => {
@@ -322,7 +336,7 @@ export function AppProvider({ children }) {
     cart, addToCart, quickAdd, removeFromCart, cartQty, cartTotal, cartCount,
     activeFilters, setActiveFilters,
     currentProductId,
-    successOrderId, successOrderPublicId,
+    successOrderId, successOrderPublicId, successOrderEmail,
     drawerOpen, setDrawerOpen,
     mobileMenuOpen, setMobileMenuOpen,
     headerSolid,
