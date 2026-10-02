@@ -1,16 +1,39 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { fmt } from '../data.js';
-import { api, toProduct, LOCALES, getLocale, storeLocale } from '../api.js';
+import {
+  api, toProduct, LOCALES, getLocale, storeLocale,
+  getCustomerToken, setCustomerToken, clearCustomerToken,
+} from '../api.js';
 
 const AppContext = createContext(null);
+
+const CART_KEY = 'tb_cart';
+
+/**
+ * Restore the saved bag. Wrapped in try/catch because localStorage throws
+ * in private windows and when site data is blocked — a shopper with cookies
+ * disabled should still get a working (just non-persistent) cart.
+ */
+function loadStoredCart() {
+  try {
+    const raw = localStorage.getItem(CART_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
 
 export function AppProvider({ children }) {
   const [page, setPageState] = useState('home');
   const [pageArg, setPageArg] = useState(null);
-  const [cart, setCart] = useState([]);
+  // The cart lives in the browser until checkout, so it has to survive a
+  // page refresh — otherwise a shopper who reloads loses their bag.
+  const [cart, setCart] = useState(loadStoredCart);
   const [activeFilters, setActiveFilters] = useState({ cat: 'all', metal: [], stock: false });
   const [currentProductId, setCurrentProductId] = useState(null);
   const [successOrderId, setSuccessOrderId] = useState('');
+  const [successOrderPublicId, setSuccessOrderPublicId] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [headerSolid, setHeaderSolid] = useState(false);
@@ -21,6 +44,11 @@ export function AppProvider({ children }) {
   const [products, setProducts] = useState([]);
   const [productsLoading, setProductsLoading] = useState(true);
   const [locale, setLocaleState] = useState(getLocale());
+
+  // ---- customer account (login is optional — guest checkout still works without it) ----
+  const [customer, setCustomer] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [wishlist, setWishlist] = useState([]); // array of product slugs currently saved
 
   // ---- toasts ----
   const toast = useCallback((msg) => {
@@ -44,6 +72,89 @@ export function AppProvider({ children }) {
     storeLocale(code);
     setLocaleState(code);
   }, []);
+
+  // ---- load the wishlist for the current logged-in customer ----
+  const refreshWishlist = useCallback(() => {
+    api.getWishlist()
+      .then((items) => setWishlist((items || []).map((i) => i.slug)))
+      .catch(() => { /* not logged in, or a transient error — leave the wishlist as-is */ });
+  }, []);
+
+  // ---- restore the customer session on page load (if a token is saved) ----
+  useEffect(() => {
+    const token = getCustomerToken();
+    if (!token) { setAuthLoading(false); return; }
+    api.me()
+      .then((profile) => { setCustomer(profile); refreshWishlist(); })
+      .catch(() => clearCustomerToken())
+      .finally(() => setAuthLoading(false));
+  }, [refreshWishlist]);
+
+  const login = useCallback(async (email, password) => {
+    const res = await api.login(email, password);
+    setCustomerToken(res.access_token);
+    setCustomer({ id: res.customer.public_id, email: res.customer.email, full_name: res.customer.name });
+    refreshWishlist();
+    toast(`Welcome back, ${res.customer.name || 'there'}`);
+  }, [refreshWishlist, toast]);
+
+  // Step 1 of signup: email a 6-digit code. Deliberately does NOT reveal
+  // whether the address already has an account.
+  const requestOtp = useCallback(async (email, purpose = 'register') => {
+    const res = await api.requestOtp(email, purpose);
+    toast(`Code sent to ${email}`);
+    return res;
+  }, [toast]);
+
+  // Step 2: the code proves the person owns the address, so the account
+  // can be created. This replaces the old password-only registration.
+  const register = useCallback(async (email, code, password, fullName) => {
+    const res = await api.registerWithOtp(email, code, password, fullName);
+    setCustomerToken(res.access_token);
+    setCustomer({ id: res.customer.public_id, email: res.customer.email, full_name: res.customer.name });
+    refreshWishlist();
+    toast('Account created — welcome to TrueBellaa');
+  }, [refreshWishlist, toast]);
+
+  // Passwordless login with an emailed code.
+  const loginWithOtp = useCallback(async (email, code) => {
+    const res = await api.loginWithOtp(email, code);
+    setCustomerToken(res.access_token);
+    setCustomer({ id: res.customer.public_id, email: res.customer.email, full_name: res.customer.name });
+    refreshWishlist();
+    toast(`Welcome back, ${res.customer.name || 'there'}`);
+  }, [refreshWishlist, toast]);
+
+  const logout = useCallback(() => {
+    clearCustomerToken();
+    setCustomer(null);
+    setWishlist([]);
+    toast('Logged out');
+    go('home');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toast]);
+
+  // ---- wishlist toggle (used by the heart icon on product cards / PDP) ----
+  const isWishlisted = useCallback((slug) => wishlist.includes(slug), [wishlist]);
+
+  const toggleWishlist = useCallback((product) => {
+    if (!customer) {
+      toast('Log in to save items to your wishlist');
+      go('account');
+      return;
+    }
+    const slug = product.slug || product.id;
+    const already = wishlist.includes(slug);
+    setWishlist((prev) => (already ? prev.filter((s) => s !== slug) : [...prev, slug]));
+    const call = already ? api.removeWishlist(slug) : api.addWishlist(slug);
+    call
+      .then(() => toast(already ? 'Removed from wishlist' : 'Saved to wishlist'))
+      .catch(() => {
+        // roll back on failure
+        setWishlist((prev) => (already ? [...prev, slug] : prev.filter((s) => s !== slug)));
+        toast('Could not update wishlist');
+      });
+  }, [customer, wishlist, toast]);
 
   // ---- navigation ----
   const go = useCallback((nextPage, arg) => {
@@ -109,12 +220,21 @@ export function AppProvider({ children }) {
     });
   }, []);
 
+  // Persist on every change so a refresh (or an accidental tab close)
+  // doesn't empty the bag.
+  useEffect(() => {
+    try {
+      localStorage.setItem(CART_KEY, JSON.stringify(cart));
+    } catch { /* private window / storage blocked — cart just won't persist */ }
+  }, [cart]);
+
   const cartTotal = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const cartCount = cart.reduce((s, i) => s + i.qty, 0);
 
   // ---- order success ----
-  const orderSuccess = useCallback((orderNumber) => {
+  const orderSuccess = useCallback((orderNumber, orderPublicId) => {
     setSuccessOrderId(orderNumber);
+    setSuccessOrderPublicId(orderPublicId || '');
     setCart([]);
     go('success');
   }, [go]);
@@ -147,7 +267,7 @@ export function AppProvider({ children }) {
           razorpay_payment_id: payment.razorpay_payment_id,
           razorpay_signature: payment.razorpay_signature,
         });
-        orderSuccess(co.order_number);
+        orderSuccess(co.order_number, co.order_public_id);
       };
 
       // 2a) DEMO mode (no live keys) — simulate a successful payment
@@ -202,12 +322,14 @@ export function AppProvider({ children }) {
     cart, addToCart, quickAdd, removeFromCart, cartQty, cartTotal, cartCount,
     activeFilters, setActiveFilters,
     currentProductId,
-    successOrderId,
+    successOrderId, successOrderPublicId,
     drawerOpen, setDrawerOpen,
     mobileMenuOpen, setMobileMenuOpen,
     headerSolid,
     toasts, toast,
     payNow, subscribe,
+    customer, authLoading, login, register, logout, requestOtp, loginWithOtp,
+    wishlist, isWishlisted, toggleWishlist,
     fmt,
   };
 

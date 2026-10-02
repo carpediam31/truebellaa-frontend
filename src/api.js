@@ -26,12 +26,28 @@ export function storeLocale(code) {
   try { localStorage.setItem('tb_locale', code); } catch { /* ignore */ }
 }
 
+// ---- customer auth token storage (guest checkout keeps working without any of this) ----
+const CUSTOMER_TOKEN_KEY = 'tb_customer_access';
+
+export function getCustomerToken() {
+  try { return localStorage.getItem(CUSTOMER_TOKEN_KEY) || null; } catch { return null; }
+}
+export function setCustomerToken(token) {
+  try { localStorage.setItem(CUSTOMER_TOKEN_KEY, token); } catch { /* ignore */ }
+}
+export function clearCustomerToken() {
+  try { localStorage.removeItem(CUSTOMER_TOKEN_KEY); } catch { /* ignore */ }
+}
+
 function headers() {
-  return {
+  const h = {
     'Content-Type': 'application/json',
     'X-Tenant-Slug': TENANT,
     'X-Locale': getLocale(),
   };
+  const token = getCustomerToken();
+  if (token) h['Authorization'] = `Bearer ${token}`;
+  return h;
 }
 
 async function req(path, opts = {}) {
@@ -39,8 +55,11 @@ async function req(path, opts = {}) {
   if (!res.ok) {
     let detail = res.statusText;
     try { detail = (await res.json()).detail || detail; } catch { /* ignore */ }
-    throw new Error(typeof detail === 'string' ? detail : 'Request failed');
+    const err = new Error(typeof detail === 'string' ? detail : 'Request failed');
+    err.status = res.status;
+    throw err;
   }
+  if (res.status === 204) return null;
   return res.json();
 }
 
@@ -78,6 +97,36 @@ export const api = {
     req('/payments/verify', { method: 'POST', body: JSON.stringify(payload) }),
   subscribe: (email) =>
     req('/newsletter/subscribe', { method: 'POST', body: JSON.stringify({ email }) }),
+
+  // ---- customer account ----
+  // Account creation now requires an emailed code — request one, then
+  // verify it. The old password-only /register is disabled server-side.
+  requestOtp: (email, purpose = 'register') =>
+    req('/auth/customer/otp/request', { method: 'POST', body: JSON.stringify({ email, purpose }) }),
+  registerWithOtp: (email, code, password, full_name) =>
+    req('/auth/customer/otp/register', {
+      method: 'POST', body: JSON.stringify({ email, code, password, full_name }),
+    }),
+  loginWithOtp: (email, code) =>
+    req('/auth/customer/otp/login', { method: 'POST', body: JSON.stringify({ email, code }) }),
+  login: (email, password) =>
+    req('/auth/customer/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  me: () => req('/customers/me'),
+  myOrders: () => req('/customers/me/orders'),
+
+  // ---- order lookup / tracking ----
+  // An order id alone is no longer enough: orders carry the buyer's name,
+  // address and email, so a guest must also supply the email used at
+  // checkout. Logged-in customers are matched on their account instead.
+  getOrder: (publicId, email) =>
+    req(`/orders/${encodeURIComponent(publicId)}${email ? `?email=${encodeURIComponent(email)}` : ''}`),
+  trackOrder: (publicId, email) =>
+    req(`/orders/${encodeURIComponent(publicId)}/tracking${email ? `?email=${encodeURIComponent(email)}` : ''}`),
+
+  // ---- wishlist (requires login) ----
+  getWishlist: () => req('/wishlist'),
+  addWishlist: (slug) => req(`/wishlist/${encodeURIComponent(slug)}`, { method: 'POST' }),
+  removeWishlist: (slug) => req(`/wishlist/${encodeURIComponent(slug)}`, { method: 'DELETE' }),
 };
 
 export { API_BASE, TENANT };
